@@ -6,8 +6,8 @@ output "service_url" {
 output "infisical_deployment_summary" {
   description = "Summary of Infisical deployment configuration"
   value = {
-    service_url           = google_cloud_run_v2_service.infisical.uri
-    custom_domain         = var.host
-    service_account       = google_service_account.infisical.email
+    service_url     = google_cloud_run_v2_service.infisical.uri
+    custom_domain   = var.host
+    service_account = google_service_account.infisical.email
   }
 }

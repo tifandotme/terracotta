@@ -23,6 +23,11 @@ resource "google_project_service" "run" {
   disable_on_destroy = true
 }
 
+resource "google_project_service" "secretmanager" {
+  service            = "secretmanager.googleapis.com"
+  disable_on_destroy = true
+}
+
 # Service account for Cloud Run
 resource "google_service_account" "infisical" {
   account_id   = "infisical-cloudrun"
@@ -39,11 +44,17 @@ resource "google_secret_manager_secret" "encryption_key" {
   labels = {
     app = "infisical"
   }
+
+  depends_on = [google_project_service.secretmanager]
 }
 
 resource "google_secret_manager_secret_version" "encryption_key" {
   secret      = google_secret_manager_secret.encryption_key.id
   secret_data = var.encryption_key
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret" "auth_secret" {
@@ -54,11 +65,17 @@ resource "google_secret_manager_secret" "auth_secret" {
   labels = {
     app = "infisical"
   }
+
+  depends_on = [google_project_service.secretmanager]
 }
 
 resource "google_secret_manager_secret_version" "auth_secret" {
   secret      = google_secret_manager_secret.auth_secret.id
   secret_data = var.auth_secret
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret" "db_uri" {
@@ -69,11 +86,17 @@ resource "google_secret_manager_secret" "db_uri" {
   labels = {
     app = "infisical"
   }
+
+  depends_on = [google_project_service.secretmanager]
 }
 
 resource "google_secret_manager_secret_version" "db_uri" {
   secret      = google_secret_manager_secret.db_uri.id
   secret_data = var.db_connection_uri
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret" "redis_url" {
@@ -84,11 +107,17 @@ resource "google_secret_manager_secret" "redis_url" {
   labels = {
     app = "infisical"
   }
+
+  depends_on = [google_project_service.secretmanager]
 }
 
 resource "google_secret_manager_secret_version" "redis_url" {
   secret      = google_secret_manager_secret.redis_url.id
   secret_data = var.redis_url
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "google_secret_manager_secret" "smtp_password" {
@@ -99,11 +128,17 @@ resource "google_secret_manager_secret" "smtp_password" {
   labels = {
     app = "infisical"
   }
+
+  depends_on = [google_project_service.secretmanager]
 }
 
 resource "google_secret_manager_secret_version" "smtp_password" {
   secret      = google_secret_manager_secret.smtp_password.id
   secret_data = var.smtp_password
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # IAM bindings for service account to access secrets
@@ -137,18 +172,19 @@ resource "google_secret_manager_secret_iam_member" "smtp_password_access" {
   member    = "serviceAccount:${google_service_account.infisical.email}"
 }
 
-# Cloud Run service with hardcoded resource limits
 resource "google_cloud_run_v2_service" "infisical" {
-  name     = "infisical"
-  location = var.region
-  ingress  = "INGRESS_TRAFFIC_ALL"
+  name                = "infisical"
+  location            = var.region
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  deletion_protection = false
 
   template {
     service_account = google_service_account.infisical.email
+    # execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
 
     scaling {
-      min_instance_count = 1
-      max_instance_count = 10
+      min_instance_count = 0
+      max_instance_count = 1
     }
 
     timeout = "300s"
@@ -169,20 +205,20 @@ resource "google_cloud_run_v2_service" "infisical" {
         cpu_idle = true
       }
 
-      # Health check probe
+      # Health check probe - disabled to allow container startup
       startup_probe {
-        initial_delay_seconds = 0
-        timeout_seconds       = 1
-        period_seconds        = 3
-        failure_threshold     = 3
+        initial_delay_seconds = 60
+        timeout_seconds       = 30
+        period_seconds        = 5
+        failure_threshold     = 10
         tcp_socket {
           port = local.container_port
         }
       }
 
       env {
-        name  = "PORT"
-        value = tostring(local.container_port)
+        name  = "HOST"
+        value = "0.0.0.0"
       }
       env {
         name  = "SITE_URL"
@@ -191,6 +227,10 @@ resource "google_cloud_run_v2_service" "infisical" {
       env {
         name  = "TELEMETRY_ENABLED"
         value = "false"
+      }
+      env {
+        name  = "DISABLE_AUDIT_LOG_STORAGE"
+        value = "true"
       }
 
       # SMTP configuration
@@ -270,6 +310,11 @@ resource "google_cloud_run_v2_service" "infisical" {
     max_instance_request_concurrency = 80
   }
 
+  traffic {
+    type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
+    percent = 100
+  }
+
   depends_on = [
     google_secret_manager_secret_iam_member.encryption_key_access,
     google_secret_manager_secret_iam_member.auth_secret_access,
@@ -280,11 +325,12 @@ resource "google_cloud_run_v2_service" "infisical" {
 }
 
 resource "google_cloud_run_v2_service_iam_member" "public_access" {
-  count    = 1 # allow public access = 1 or 0
-  name     = "infisical"
+  name     = google_cloud_run_v2_service.infisical.name
   location = var.region
   role     = "roles/run.invoker"
   member   = "allUsers"
+
+  depends_on = [google_cloud_run_v2_service.infisical]
 }
 
 resource "google_cloud_run_domain_mapping" "infisical_domain" {
