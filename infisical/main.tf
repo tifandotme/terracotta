@@ -179,8 +179,8 @@ resource "google_cloud_run_v2_service" "infisical" {
   deletion_protection = false
 
   template {
-    service_account = google_service_account.infisical.email
-    # execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+    service_account       = google_service_account.infisical.email
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
 
     scaling {
       min_instance_count = 0
@@ -200,9 +200,10 @@ resource "google_cloud_run_v2_service" "infisical" {
       resources {
         limits = {
           cpu    = "1"
-          memory = "1Gi"
+          memory = "2Gi"
         }
-        cpu_idle = true
+        cpu_idle          = true
+        startup_cpu_boost = true
       }
 
       # Health check probe - disabled to allow container startup
